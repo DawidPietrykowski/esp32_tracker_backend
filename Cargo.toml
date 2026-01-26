@@ -1,0 +1,10 @@
+[package]
+name = "esp32_tracker_backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.8"
+sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono" ] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6.8", features = ["fs"] }
