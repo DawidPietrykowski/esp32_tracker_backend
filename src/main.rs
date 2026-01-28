@@ -10,7 +10,8 @@ use sqlx::{
     SqlitePool,
     types::chrono::{DateTime, Local, Utc},
 };
-use tower_http::services::ServeDir;
+use tower_http::{services::ServeDir, trace::TraceLayer};
+use tracing_subscriber::EnvFilter;
 
 async fn add_location(
     State(pool): State<SqlitePool>,
@@ -72,6 +73,10 @@ async fn get_location(State(pool): State<SqlitePool>) -> Result<String, (StatusC
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()  
+        .with_env_filter(EnvFilter::from_default_env())  
+        .init();  
+ 
     let pool = SqlitePool::connect(&env::var("DATABASE_URL").unwrap())
         .await
         .unwrap();
@@ -80,7 +85,12 @@ async fn main() {
         .route("/pos", post(add_location))
         .route("/pos", get(get_location))
         .fallback_service(get_service(ServeDir::new("./web")))
+        .layer(TraceLayer::new_for_http())
         .with_state(pool);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+
+    println!("Starting server");
+    println!("Listening on 0.0.0.0:3000");
+
     axum::serve(listener, app).await.unwrap();
 }
