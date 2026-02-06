@@ -23,6 +23,8 @@ use wincode::{SchemaRead, SchemaWrite};
 pub struct LocationFrame {
     latitude: f64,
     longitude: f64,
+    signal: f64,
+    battery: f64,
     timestamp: u64,
 }
 
@@ -47,11 +49,13 @@ async fn add_location(
 
     let id = sqlx::query!(
         r#"
-INSERT INTO locations ( latitude, longitude, generated, received )
-VALUES ( ?1, ?2, ?3, ?4 )
+INSERT INTO locations ( latitude, longitude, signal, battery, generated, received )
+VALUES ( ?1, ?2, ?3, ?4, ?5, ?6 )
         "#,
         frame.latitude,
         frame.longitude,
+        frame.signal,
+        frame.battery,
         generated_time,
         time,
     )
@@ -69,6 +73,8 @@ VALUES ( ?1, ?2, ?3, ?4 )
 struct LocationEntry {
     latitude: f64,
     longitude: f64,
+    signal: f64,
+    battery: f64,
     #[serde(with = "ts_seconds")]
     generated: DateTime<Utc>,
     #[serde(with = "ts_seconds")]
@@ -80,8 +86,10 @@ async fn get_location(State(pool): State<SqlitePool>) -> Result<String, (StatusC
         LocationEntry,
         r#"
     SELECT 
-        latitude, 
-        longitude, 
+        latitude,
+        longitude,
+        signal,
+        battery,
         generated as "generated: _", 
         received as "received: _"
     FROM locations 

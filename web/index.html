@@ -7,46 +7,123 @@
     <link rel='stylesheet' href='https://unpkg.com/maplibre-gl@5.17.0/dist/maplibre-gl.css' />
     <script src='https://unpkg.com/maplibre-gl@5.17.0/dist/maplibre-gl.js'></script>
     <style>
-        body { margin: 0; padding: 0; }
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
         html, body, #map { height: 100%; }
 
         #recenter-btn {
             position: absolute;
-            top: 20px;
+            bottom: 30px;
             right: 20px;
             z-index: 10;
             background-color: white;
             border: 2px solid #ccc;
             padding: 10px 20px;
-            border-radius: 5px;
+            border-radius: 8px;
             cursor: pointer;
-            font-family: sans-serif;
             font-weight: bold;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: all 0.2s;
         }
-        #recenter-btn:hover {
-            background-color: #f0f0f0;
-        }
+        #recenter-btn:hover { background-color: #f8f9fa; transform: translateY(-1px); }
         .tracking-active { color: #007bff; border-color: #007bff !important; }
-        .tracking-inactive { color: #333; }
+        .tracking-inactive { color: #555; }
+
+        #stats-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            background-color: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(5px);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            min-width: 200px;
+        }
+
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; align-items: center; }
+        .stat-label { color: #666; font-size: 0.85rem; font-weight: 500; }
+        .stat-value { font-weight: bold; font-size: 1rem; color: #333; }
+        
+        .main-time { font-size: 1.2rem; margin-bottom: 2px; }
+        .sub-time { font-size: 0.8rem; color: #888; margin-bottom: 12px; display: block; }
+        
+        .high { color: #28a745; }
+        .medium { color: #000000; }
+        .low { color: #dc3545; }
     </style>
 </head>
 <body>
+
 <div id="map"></div>
+
 <button id="recenter-btn" class="tracking-active">Target Lock: ON</button>
+
+<div id="stats-panel">
+    <div class="stat-value main-time" id="disp-time">Loading...</div>
+    <span class="sub-time" id="disp-ago">Waiting for fix...</span>
+    
+    <div class="stat-row">
+        <span class="stat-label">Battery</span>
+        <span class="stat-value" id="disp-bat">--%</span>
+    </div>
+    <div class="stat-row" style="margin-bottom: 0;">
+        <span class="stat-label">Signal</span>
+        <span class="stat-value" id="disp-sig">--</span>
+    </div>
+</div>
+
 
 <script>
     const map = new maplibregl.Map({
         container: 'map',
         style: 'https://tiles.openfreemap.org/styles/bright',
         zoom: 1,
-        center: [0, 0]
+        center: [0, 0],
+        attributionControl: {
+            compact: false
+        }
     });
 
     let isFollowing = true; 
     let latestCoordinates = [0, 0];
 
     const btn = document.getElementById('recenter-btn');
+    const elTime = document.getElementById('disp-time');
+    const elAgo = document.getElementById('disp-ago');
+    const elBat = document.getElementById('disp-bat');
+    const elSig = document.getElementById('disp-sig');
+
+    function getTimeAgo(timestamp) {
+        const seconds = Math.floor(Date.now() / 1000) - timestamp;
+        if (seconds < 5) return "Just now";
+        if (seconds < 60) return `${seconds}s ago`;
+        if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+        return `${Math.floor(seconds / 3600)}h ago`;
+    }
+
+    function updateBatteryUI(level) {
+        level *= 100.0;
+        if (!level && level !== 0) return { text: 'N/A', class: '' };
+        let colorClass = 'high';
+        if (level < 50) colorClass = 'medium';
+        if (level < 20) colorClass = 'low';
+        return { text: level.toFixed(2) + '%', class: colorClass };
+    }
+
+    function updateDashboard(data) {
+        const date = new Date(data.generated * 1000);
+        
+        elTime.innerText = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        elAgo.innerText = getTimeAgo(data.generated);
+
+        const batInfo = updateBatteryUI(data.battery);
+        elBat.innerText = batInfo.text;
+        elBat.className = "stat-value " + batInfo.class;
+
+        const signal = data.signal !== undefined ? (data.signal * 100).toFixed(2) + '%' : 'N/A';
+        elSig.innerText = signal;
+    }
 
     btn.addEventListener('click', () => {
         isFollowing = true;
@@ -94,7 +171,6 @@
             return {
                 type: 'Feature',
                 geometry: { type: 'Point', coordinates: [data.longitude, data.latitude] },
-                properties: { 'time_label': new Date(data.generated * 1000).toLocaleString() }
             };
         };
 
@@ -104,6 +180,7 @@
             const initialGeoJson = getGeoJson(initialData);
 
             latestCoordinates = [initialData.longitude, initialData.latitude];
+            updateDashboard(initialData);
 
             map.addSource('esp32', { type: 'geojson', data: initialGeoJson });
             map.addLayer({
@@ -112,10 +189,7 @@
                 'source': 'esp32',
                 'layout': {
                     'icon-image': 'blue-dot',
-                    'icon-size': 0.4, // Small dot size
-                    'text-field': ['get', 'time_label'],
-                    'text-offset': [0, 1.25],
-                    'text-anchor': 'top'
+                    'icon-size': 0.6,
                 }
             });
 
@@ -129,6 +203,8 @@
                         const json = getGeoJson(data);
                         latestCoordinates = [data.longitude, data.latitude];
                         map.getSource('esp32').setData(json);
+
+                        updateDashboard(data);
 
                         if (isFollowing) {
                             map.easeTo({
