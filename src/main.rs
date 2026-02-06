@@ -1,7 +1,9 @@
+use dotenv::dotenv;
 use std::env;
 
 use axum::{
     Router,
+    body::Bytes,
     extract::State,
     http::StatusCode,
     routing::{get, get_service, post},
@@ -13,25 +15,44 @@ use sqlx::{
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::EnvFilter;
 
+use chrono::serde::ts_seconds;
+use serde::{Deserialize, Serialize};
+use wincode::{SchemaRead, SchemaWrite};
+
+#[derive(SchemaWrite, SchemaRead, Serialize, Debug)]
+pub struct LocationFrame {
+    latitude: f64,
+    longitude: f64,
+    timestamp: u64,
+}
+
 async fn add_location(
     State(pool): State<SqlitePool>,
-    location: String,
+    body: Bytes,
 ) -> Result<String, (StatusCode, String)> {
     let mut conn = pool
         .acquire()
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    let frame: LocationFrame = wincode::deserialize(&body).unwrap();
+
     let time = Local::now().to_utc();
+    let generated_time = DateTime::from_timestamp(frame.timestamp as i64, 0).ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to decode frame".to_string(),
+        )
+    })?;
 
     let id = sqlx::query!(
         r#"
 INSERT INTO locations ( latitude, longitude, generated, received )
 VALUES ( ?1, ?2, ?3, ?4 )
         "#,
-        location,
-        location,
-        time,
+        frame.latitude,
+        frame.longitude,
+        generated_time,
         time,
     )
     .execute(&mut *conn)
@@ -44,10 +65,13 @@ VALUES ( ?1, ?2, ?3, ?4 )
 
 #[derive(Debug)]
 #[allow(dead_code)]
+#[derive(Serialize, Deserialize)]
 struct LocationEntry {
     latitude: f64,
     longitude: f64,
+    #[serde(with = "ts_seconds")]
     generated: DateTime<Utc>,
+    #[serde(with = "ts_seconds")]
     received: DateTime<Utc>,
 }
 
@@ -68,15 +92,18 @@ async fn get_location(State(pool): State<SqlitePool>) -> Result<String, (StatusC
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(format!("{:?}", location))
+    serde_json::to_string(&location).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()  
-        .with_env_filter(EnvFilter::from_default_env())  
-        .init();  
- 
+    // Load .env file
+    dotenv().ok();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let pool = SqlitePool::connect(&env::var("DATABASE_URL").unwrap())
         .await
         .unwrap();

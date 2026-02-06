@@ -1,1 +1,147 @@
-test
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>ESP32 tracker</title>
+    <meta charset='utf-8'>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel='stylesheet' href='https://unpkg.com/maplibre-gl@5.17.0/dist/maplibre-gl.css' />
+    <script src='https://unpkg.com/maplibre-gl@5.17.0/dist/maplibre-gl.js'></script>
+    <style>
+        body { margin: 0; padding: 0; }
+        html, body, #map { height: 100%; }
+
+        #recenter-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+            background-color: white;
+            border: 2px solid #ccc;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: sans-serif;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        #recenter-btn:hover {
+            background-color: #f0f0f0;
+        }
+        .tracking-active { color: #007bff; border-color: #007bff !important; }
+        .tracking-inactive { color: #333; }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+<button id="recenter-btn" class="tracking-active">Target Lock: ON</button>
+
+<script>
+    const map = new maplibregl.Map({
+        container: 'map',
+        style: 'https://tiles.openfreemap.org/styles/bright',
+        zoom: 1,
+        center: [0, 0]
+    });
+
+    let isFollowing = true; 
+    let latestCoordinates = [0, 0];
+
+    const btn = document.getElementById('recenter-btn');
+
+    btn.addEventListener('click', () => {
+        isFollowing = true;
+        updateButtonState();
+        map.flyTo({ center: latestCoordinates, speed: 2 });
+    });
+
+    // Disable following on drag
+    map.on('dragstart', () => {
+        isFollowing = false;
+        updateButtonState();
+    });
+
+    function updateButtonState() {
+        if(isFollowing) {
+            btn.textContent = "Position Lock: ON (Drag to disable)";
+            btn.className = "tracking-active";
+        } else {
+            btn.textContent = "Position Lock: OFF";
+            btn.className = "tracking-inactive";
+        }
+    }
+    updateButtonState();
+
+    map.on('load', async () => {
+        const url = new URL(window.location).origin + '/pos';
+
+        // Add SVG icon
+        const svg = `
+        <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="20" cy="20" r="18" fill="#4285F4" stroke="#ffffff" stroke-width="4"/>
+        </svg>`;
+        const image = new Image(40, 40);
+        image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        // Ensure it's loaded
+        await new Promise(resolve => {
+            image.onload = () => {
+                map.addImage('blue-dot', image);
+                resolve();
+            };
+        });
+
+        // Convert json from backend to geojson
+        const getGeoJson = (data) => {
+            return {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [data.longitude, data.latitude] },
+                properties: { 'time_label': new Date(data.generated * 1000).toLocaleString() }
+            };
+        };
+
+        try {
+            const response = await fetch(url);
+            const initialData = await response.json();
+            const initialGeoJson = getGeoJson(initialData);
+
+            latestCoordinates = [initialData.longitude, initialData.latitude];
+
+            map.addSource('esp32', { type: 'geojson', data: initialGeoJson });
+            map.addLayer({
+                'id': 'esp32',
+                'type': 'symbol',
+                'source': 'esp32',
+                'layout': {
+                    'icon-image': 'blue-dot',
+                    'icon-size': 0.4, // Small dot size
+                    'text-field': ['get', 'time_label'],
+                    'text-offset': [0, 1.25],
+                    'text-anchor': 'top'
+                }
+            });
+
+            map.jumpTo({ center: latestCoordinates, zoom: 15 });
+
+            // Start loop
+            window.setInterval(() => {
+                fetch(url)
+                    .then(r => r.json())
+                    .then(data => {
+                        const json = getGeoJson(data);
+                        latestCoordinates = [data.longitude, data.latitude];
+                        map.getSource('esp32').setData(json);
+
+                        if (isFollowing) {
+                            map.easeTo({
+                                center: latestCoordinates
+                            });
+                        }
+                    });
+            }, 500);
+
+        } catch (error) {
+            console.error("Error loading map data:", error);
+        }
+    });
+</script>
+</body>
+</html>
