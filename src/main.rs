@@ -37,7 +37,14 @@ async fn add_location(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let frame: LocationFrame = wincode::deserialize(&body).unwrap();
+    let frame: LocationFrame = wincode::deserialize(&body).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid serialization: {}", e),
+        )
+    })?;
+
+    println!("Decoded Message: {:#?}", frame);
 
     let time = Local::now().to_utc();
     let generated_time = DateTime::from_timestamp(frame.timestamp as i64, 0).ok_or_else(|| {
