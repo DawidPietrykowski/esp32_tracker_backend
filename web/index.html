@@ -63,10 +63,6 @@
     <div class="stat-value main-time" id="disp-time">Loading...</div>
     <span class="sub-time" id="disp-ago">Waiting for fix...</span>
     
-    <div class="stat-row">
-        <span class="stat-label">Battery</span>
-        <span class="stat-value" id="disp-bat">--%</span>
-    </div>
     <div class="stat-row" style="margin-bottom: 0;">
         <span class="stat-label">Signal</span>
         <span class="stat-value" id="disp-sig">--</span>
@@ -91,7 +87,6 @@
     const btn = document.getElementById('recenter-btn');
     const elTime = document.getElementById('disp-time');
     const elAgo = document.getElementById('disp-ago');
-    const elBat = document.getElementById('disp-bat');
     const elSig = document.getElementById('disp-sig');
 
     function getTimeAgo(timestamp) {
@@ -102,24 +97,11 @@
         return `${Math.floor(seconds / 3600)}h ago`;
     }
 
-    function updateBatteryUI(level) {
-        level *= 100.0;
-        if (!level && level !== 0) return { text: 'N/A', class: '' };
-        let colorClass = 'high';
-        if (level < 50) colorClass = 'medium';
-        if (level < 20) colorClass = 'low';
-        return { text: level.toFixed(2) + '%', class: colorClass };
-    }
-
     function updateDashboard(data) {
         const date = new Date(data.generated * 1000);
         
         elTime.innerText = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         elAgo.innerText = getTimeAgo(data.generated);
-
-        const batInfo = updateBatteryUI(data.battery);
-        elBat.innerText = batInfo.text;
-        elBat.className = "stat-value " + batInfo.class;
 
         const signal = data.signal !== undefined ? (data.signal * 100).toFixed(2) + '%' : 'N/A';
         elSig.innerText = signal;
